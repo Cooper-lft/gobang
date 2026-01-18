@@ -1,28 +1,46 @@
 #ifndef MYHEAD_H
 #define MYHEAD_H
 
+//系统头文件
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define SIZE 15
+#define CHARSIZE 3
+#define PVP 1  //人人对战模式
+#define PVE 0  //人机对战模式
+
 //定义方向枚举
 typedef enum{
-    HORIZONTAL=0, //水平方向
-    VERTICAL,     //竖直方向
-    DIAG_L,
-    DIAG_R
-}Direction;//方向：水平，竖直，主对角线，副对角线
+    HOR=0, //水平方向
+    VER,   //竖直方向
+    DIAG_M,//主对角线
+    DIAG_S //副对角线
+}Direction;//方向：水平，竖直，主对角线(mian)，副对角线(sub)
 
-typedef struct
-{
-    int count; //连子个数
-    int blocked; //封子数(0=活，1=半活，2=死)
-}LineInfo; //记录一条线上的信息
+#define LIVE 0//活
+#define SEMI_LIVE 1//半活
+#define DEAD 2//死
+typedef struct{
+    int count; //连子数
+    int blocked; //被封堵数（0=活，1=半活，2=死）
+}LineInfo;//先定义一条线上的结构体记录信息
 
-struct PointScore{
-    int x;
-    int y;
-    int attackScore;
-    int defenseScore;
-};
+//棋子状态：黑子和白子
+#define BLACK 1
+#define WHITE 2
+#define EMPTY 0
+typedef struct{
+    int state; //当前点的状态：EMPTY/BLACK/WHITE
+    //四个方向的落子信息
+    //索引见方向枚举：HOR，VER，DIAG_M,DIAG_S;
+    LineInfo line[4];
+    int attackScore;//己方落子得分
+    int defenseScore;//防守得分（落子阻止对方获胜）
+}PointInfo;//棋盘上一点的详细信息，包括状态，连珠数和得分等
 
-//不同落子下的得分
+//不同落子下的得分的宏
 #define WIN5 10000000000
 #define LIVE4 10000
 #define DEAD4 1000
@@ -31,6 +49,11 @@ struct PointScore{
 #define LIVE2 100
 #define DEAD2 10
 
+
+//函数声明
+void initRecordBorard(void);
+void innerLayoutToDisplayArray(void);
+void displayBoard(void);
 int selectmode();
 
 #endif
