@@ -40,7 +40,7 @@ Point currentPoint={-1,-1};//记录当前下的子的位置
 int main()
 {
     srand((unsigned int)time(NULL));//获取随机数种子
-
+    initZobrist();//初始化置换表
     initRecordBorard();//初始化棋盘
     int isWin=0;
     int workstate;
