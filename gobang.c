@@ -72,26 +72,38 @@ int main()
             innerLayoutToDisplayArray(currentPoint);
             displayBoard();
             
-            switch (whoFirst){
-            case PLAYERFIRST:
+            switch (whoFirst){//看是人先还是AI先
+            case PLAYERFIRST://玩家先，为黑子
                 while(1){
-                    currentPoint=getPlayerMove(currentPlayerColor);
+                    currentPoint=getPlayerMove(currentPlayerColor);//获取玩家落子
                     arrayForInnerBoardLayout[currentPoint.y][currentPoint.x]=currentPlayerColor;
                     
-                    innerLayoutToDisplayArray(currentPoint); 
-                    displayBoard();
+                    innerLayoutToDisplayArray(currentPoint); //将当前落子更新到显示数组
+                    displayBoard();//显示棋盘
                     isWin=checkWin(currentPoint.x,currentPoint.y,currentPlayerColor);
-                    if(isWin==1){
+                    if(isWin==1&&isForbiddenPoint(currentPoint.x,currentPoint.y)!=1){//检查是否获胜且不是禁手
                         printf("黑方获胜\n");
                         return 0;
-                    }else{
+                    }else if(isForbiddenPoint(currentPoint.x,currentPoint.y)==1){
+                        printf("黑方落子(%c,%d)为禁手，白方获胜\n",currentPoint.x+'A',SIZE-currentPoint.y);
+                        return 0;
+                    }else{//没赢，轮到AI，是白子
                         currentPlayerColor=WHITE;
                     }
 
-                    currentPoint=getBestMove(currentPlayerColor);
+                    currentPoint=getBestMove(currentPlayerColor);//获取AI落子
+                    // 如果getBestMove在空盘或异常情况下返回(-1,-1)，落子到天元（中央）
+                    if(currentPoint.x==-1 || currentPoint.y==-1){
+                        currentPoint.x = SIZE/2;
+                        currentPoint.y = SIZE/2;
+                    }
                     arrayForInnerBoardLayout[currentPoint.y][currentPoint.x]=currentPlayerColor;
                     innerLayoutToDisplayArray(currentPoint);
                     displayBoard();
+                    // 显示AI最后落子的棋盘坐标（列字母, 行数字，与棋盘显示一致）
+                    printf("AI落子：(%d,%c)\n",  SIZE - currentPoint.y,currentPoint.x + 'A');
+                    printf("AI用时：%.2fs\n", lastAIDuration);
+                    fflush(stdout);
                     isWin=checkWin(currentPoint.x,currentPoint.y,currentPlayerColor);
                     if(isWin==1){
                         printf("白方获胜\n");
@@ -105,9 +117,18 @@ int main()
             case AIFIRST:
                 while(1){
                     currentPoint=getBestMove(currentPlayerColor);
+                    // 保护性处理：若AI在开局返回无效点，落子天元
+                    if(currentPoint.x==-1 || currentPoint.y==-1){
+                        currentPoint.x = SIZE/2;
+                        currentPoint.y = SIZE/2;
+                    }
                     arrayForInnerBoardLayout[currentPoint.y][currentPoint.x]=currentPlayerColor;
                     innerLayoutToDisplayArray(currentPoint);
                     displayBoard();
+                    // 显示AI最后落子的棋盘坐标（列字母, 行数字，与棋盘显示一致）
+                    printf("AI落子：(%d,%c)\n",  SIZE - currentPoint.y,currentPoint.x + 'A');
+                    printf("AI用时：%.2fs\n", lastAIDuration);
+                    fflush(stdout);
                     isWin=checkWin(currentPoint.x,currentPoint.y,currentPlayerColor);
                     if(isWin==1){
                         printf("黑方获胜\n");
@@ -129,6 +150,27 @@ int main()
                     }
                 }
                 break;
+            }
+        }
+        
+    }else if(workstate==PVP){//PVP主程序
+        while (1)
+        {
+            //显示棋盘
+            innerLayoutToDisplayArray(currentPoint);
+            displayBoard();
+            
+            currentPoint=getPlayerMove(currentPlayerColor);//获取玩家落子
+            arrayForInnerBoardLayout[currentPoint.y][currentPoint.x]=currentPlayerColor;
+            innerLayoutToDisplayArray(currentPoint);
+            displayBoard();
+            
+            isWin=checkWin(currentPoint.x,currentPoint.y,currentPlayerColor);
+            if(isWin==1){
+                printf("%s方获胜\n",((currentPlayerColor==BLACK)?"黑":"白"));
+                return 0;
+            }else{
+                currentPlayerColor=(currentPlayerColor==BLACK)? WHITE:BLACK;
             }
         }
         
@@ -242,7 +284,7 @@ void displayBoard(){
     }
     printf("\n");
     //显示作者名字
-    printf("作者：李丰廷\n");
+    printf("Work of 李丰廷\n");
 } 
 
 //选择下棋模式

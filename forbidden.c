@@ -39,11 +39,9 @@ static int analyzeLine(int x, int y, int dx, int dy) {
     // 只需要看包含中心点(索引4)的连珠
     int maxLen = 0;
     int currentLen = 0;
+
     
-    // 简单的连续判断无法处理跳四(10111)或跳三，所以需要更精细的模式匹配
-    // 这里采用核心特征判断法
-    
-    // --- 判断长连 (6个及以上) ---
+    // 判断长连(6个及以上)
     int left = 4, right = 4;
     while (left > 0 && line[left - 1] == BLACK) left--;
     while (right < 8 && line[right + 1] == BLACK) right++;
@@ -51,7 +49,7 @@ static int analyzeLine(int x, int y, int dx, int dy) {
     if (len >= 6) return 4; // 长连
     if (len == 5) return 3; // 五连
 
-    // --- 接下来判断 四 和 活三 ---
+    // 接下来判断四和活三
     // 为了准确判断跳四和跳三，我们分析中心点左右的结构
     
     // 我们的目标是识别以下模式 (B=Black, E=Empty, W=White/Wall)
@@ -84,7 +82,7 @@ static int analyzeLine(int x, int y, int dx, int dy) {
     }
 
     // B. 检测“活三” (Live Three)
-    // 根据PDF定义，活三必须是“本方再走一着可以形成活四”。
+    // 活三必须是“本方再走一着可以形成活四”。
     // 典型形状： 0 1 1 1 0 (标准) 或 0 1 0 1 1 0 (跳三)
     // 关键点：两端必须是空的，且被封堵后不能成四
     
@@ -107,12 +105,9 @@ static int analyzeLine(int x, int y, int dx, int dy) {
     return 0;
 }
 
-int isForbiddenPoint(int x, int y) {
-    // 禁手规则只针对黑棋
-    // 如果当前轮到白棋下，或者我们要判断白棋，那肯定不是禁手
-    // 但这个函数通常只在黑棋回合调用，或者传入时确保是判断黑棋落子
+int isForbiddenPoint(int x, int y){
     
-    // 0. 预判：如果这个点本身已经有子，不能下（虽然逻辑上不属于禁手，但属于非法落子）
+    //如果这个点本身已经有子，不能下
     if (arrayForInnerBoardLayout[y][x] != EMPTY) return 0;
 
     int fiveCount = 0;
@@ -133,18 +128,18 @@ int isForbiddenPoint(int x, int y) {
         else if (result == 1) threeCount++; // 活三
     }
 
-    // 禁手优先级判断规则 (参考PDF首页)：
+    // 禁手优先级判断规则：
     
-    // 1. "黑方五连与禁手同时形成，禁手失效，黑方胜"
+    // 黑方五连与禁手同时形成，禁手失效，黑方胜
     if (fiveCount > 0) return 0; 
 
-    // 2. "长连禁手"：形成的5个以上同色棋子
+    // 长连禁手：形成的5个以上同色棋子
     if (overlineCount > 0) return 1;
 
-    // 3. "四四禁手"：形成两个或两个以上的冲四或活四
+    // 四四禁手：形成两个或两个以上的冲四或活四
     if (fourCount >= 2) return 1;
 
-    // 4. "三三禁手"：形成两个或两个以上的活三
+    // 三三禁手：形成两个或两个以上的活三
     if (threeCount >= 2) return 1;
 
     return 0; // 不是禁手

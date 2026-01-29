@@ -36,9 +36,105 @@ clock_t startTime;
 
 
 //参数是己方的棋子颜色
+// 全局：记录上次 AI 决策用时（秒）
+double lastAIDuration = 0.0;
+
+
+// 如果没有威胁点则返回{-1,-1)，否则返回封堵威胁的点
+Point handle_opponent_fours(int myColor) {
+    Point res = {-1, -1};
+    if (currentPoint.x < 0 || currentPoint.y < 0) return res;
+    int enemyColor = (myColor == BLACK) ? WHITE : BLACK;
+    if (arrayForInnerBoardLayout[currentPoint.y][currentPoint.x] != enemyColor) return res;
+
+    int lr = currentPoint.y, lc = currentPoint.x;
+    int found = 0;
+    // 检查任何方向的四个点 (包括冲四/活四)
+    for (int d = 0; d < 4; d++) {
+        LineInfo li = countLine(lc, lr, enemyColor, d);
+        if (li.count >= 4) { found = 1; break; }
+    }
+    if (!found) return res;
+
+    // 如果AI能直接赢则下该点
+    for (int r = 0; r < SIZE; r++) {
+        for (int c = 0; c < SIZE; c++) {
+            if (arrayForInnerBoardLayout[r][c] != EMPTY) continue;
+            if (myColor == BLACK && isForbiddenPoint(c, r)) continue;
+            if (!hasNeighbor(c, r, DISTANCE)) continue;
+            if (evaluateOnecolor(c, r, myColor) >= WIN) return (Point){c, r};
+        }
+    }
+
+    // 收集上一步棋(对手)的封堵点
+    Move cand[SIZE*SIZE]; int cc = 0;
+    int rowS = (lr-4<0)?0:lr-4; int rowE = (lr+4>SIZE-1)?SIZE-1:lr+4;
+    int colS = (lc-4<0)?0:lc-4; int colE = (lc+4>SIZE-1)?SIZE-1:lc+4;
+    for (int r = rowS; r <= rowE; r++){
+        for (int c = colS; c <= colE; c++){
+            if (arrayForInnerBoardLayout[r][c] != EMPTY) continue;
+            int def = evaluateOnecolor(c, r, enemyColor);
+            if (def >= LIVE3) {
+                cand[cc].p.x = c; cand[cc].p.y = r; cand[cc].score = def + WIN/2; cc++;
+            }
+        }
+    }
+    if (cc==0) return res;
+    if (cc>1) qsort(cand, cc, sizeof(Move), compareMoves);
+    return cand[0].p;
+}
+
+Point handle_opponent_broken4(int myColor){
+    return handle_opponent_fours(myColor);
+}
+
+Point handle_opponent_live3(int myColor){
+    Point res = {-1,-1};
+    if (currentPoint.x < 0 || currentPoint.y < 0) return res;
+    int enemyColor = (myColor == BLACK) ? WHITE : BLACK;
+    if (arrayForInnerBoardLayout[currentPoint.y][currentPoint.x] != enemyColor) return res;
+
+    int lr = currentPoint.y, lc = currentPoint.x;
+    int live3_found = 0, live4_found = 0;
+    for (int d=0; d<4; d++){
+        LineInfo li = countLine(lc, lr, enemyColor, d);
+        if (li.count == 3 && li.blocked == LIVE) live3_found = 1;
+        if (li.count >= 4) live4_found = 1;
+    }
+    if (!live3_found) return res;
+
+    // 如果我方有直接必胜或能造活四，优先反击
+    for (int r = 0; r < SIZE; r++){
+        for (int c = 0; c < SIZE; c++){
+            if (arrayForInnerBoardLayout[r][c] != EMPTY) continue;
+            if (myColor == BLACK && isForbiddenPoint(c, r)) continue;
+            if (!hasNeighbor(c, r, DISTANCE)) continue;
+            int myAttack = evaluateOnecolor(c, r, myColor);
+            if (myAttack >= WIN) return (Point){c, r};
+            if (myAttack >= LIVE4) return (Point){c, r};
+        }
+    }
+
+    // 否则必须堵活三，收集封堵点并返回最佳
+    Move cand[SIZE*SIZE]; int cc=0;
+    int rowS = (lr-4<0)?0:lr-4; int rowE = (lr+4>SIZE-1)?SIZE-1:lr+4;
+    int colS = (lc-4<0)?0:lc-4; int colE = (lc+4>SIZE-1)?SIZE-1:lc+4;
+    for (int r=rowS;r<=rowE;r++){
+        for (int c=colS;c<=colE;c++){
+            if (arrayForInnerBoardLayout[r][c] != EMPTY) continue;
+            int def = evaluateOnecolor(c, r, enemyColor);
+            if (def >= LIVE3){ cand[cc].p.x=c; cand[cc].p.y=r; cand[cc].score=def+WIN/2; cc++; }
+        }
+    }
+    if (cc==0) return res;
+    if (cc>1) qsort(cand, cc, sizeof(Move), compareMoves);
+    return cand[0].p;
+}
+
 Point getBestMove(int myColor) {
     Point bestMove = {-1, -1};
-    
+    int enemyColor = (myColor == BLACK) ? WHITE : BLACK;
+
     //如果开局AI先行，直接下天元
     if (isBoardEmpty()) {
         bestMove.x = 7; bestMove.y = 7;
@@ -50,38 +146,61 @@ Point getBestMove(int myColor) {
     isTimeOut = 0;
     double timeLimit = 8.0; // 8秒限制
 
-    //生成第一层候选点(即Max层的子分支，AI可能要落的点)
-    Move moves[SIZE*SIZE];
-    int count = generateMoves(moves, myColor);
-    
-    // 迭代加深 (Iterative Deepening)
-    // 从 2 层开始搜，搜完 2 层如果时间够，搜 4 层，然后 6 层...
-    // 每次深度增加，都会利用 TT 表中的数据加速
+    // 准备候选缓冲区（用于在发现紧急威胁时直接使用）
+    Move candidateMoves[SIZE*SIZE];
+    int candidateCount = 0;
+    int useCandidates = 0; // 1 表示后续迭代加深只使用 candidateMoves
+
+    // 1) 先判断我方有没有一步必胜点 (先手必赢)
+    for (int row = 0; row < SIZE; row++) {
+        for (int col = 0; col < SIZE; col++) {
+            if (arrayForInnerBoardLayout[row][col] != EMPTY) continue;
+            if (myColor == BLACK && isForbiddenPoint(col, row)) continue;
+            if (!hasNeighbor(col, row, DISTANCE)) continue;
+
+            int attackScore = evaluateOnecolor(col, row, myColor);
+            if (attackScore >= WIN) {
+                bestMove.x = col;
+                bestMove.y = row;
+                return bestMove; // 直接赢
+            }
+        }
+    }
+
+    // 2) 用封装函数优先处理对手最近一手的威胁（若有则直接返回应对点）
+    Point threatPoint;
+    threatPoint = handle_opponent_fours(myColor);
+    if (threatPoint.x != -1) return threatPoint;
+    threatPoint = handle_opponent_broken4(myColor);
+    if (threatPoint.x != -1) return threatPoint;
+    threatPoint = handle_opponent_live3(myColor);
+    if (threatPoint.x != -1) return threatPoint;
+
+    // 生成第一层候选点
+    Move rootMoves[SIZE*SIZE];
+    int rootCount = 0;
+    if (useCandidates) {
+        // 使用前面收集到的紧急候选点
+        for (int i = 0; i < candidateCount; i++) rootMoves[rootCount++] = candidateMoves[i];
+    } else {
+        // 否则按原有逻辑生成候选点
+        rootCount = generateMoves(rootMoves, myColor);
+    }
+
+    // 迭代加深
     for (int depth = 2; depth <= 20; depth += 2) {
-        
         Point currentBestMove = {-1, -1};
         int currentBestScore = -INF;
-        
-        // --- 根节点搜索 (复制一部分代码出来以便获取 Move) ---
-        Move moves[SIZE*SIZE];
-        int count = generateMoves(moves, myColor);
-        
         int alpha = -INF; 
         int beta = INF;
 
-        // 这里我们把 sort(moves) 加上
-        // 并且！如果有上一层搜到的 bestMove (TT表中可能有)，应该把它排在第一个！
-        // (PV-Move Ordering，暂且不写这么复杂，靠 qsort 也就够了)
-
-        for (int i = 0; i < count; i++) {
-            makeMove(moves[i].p, myColor);
-            
+        for (int i = 0; i < rootCount; i++) {
+            makeMove(rootMoves[i].p, myColor);
             // 调用 minimax
             int score = minimax(depth - 1, alpha, beta, 0, myColor);
-            
-            unmakeMove(moves[i].p);
+            unmakeMove(rootMoves[i].p);
 
-            // 【关键】检查是否超时
+            // 检查是否超时
             if ((double)(clock() - startTime) / CLOCKS_PER_SEC >= timeLimit) {
                 isTimeOut = 1;
                 break; // 跳出循环
@@ -89,27 +208,25 @@ Point getBestMove(int myColor) {
 
             if (score > currentBestScore) {
                 currentBestScore = score;
-                currentBestMove = moves[i].p;
+                currentBestMove = rootMoves[i].p;
             }
             if (currentBestScore > alpha) alpha = currentBestScore;
         }
-
-        // 如果在这一层搜索过程中超时了，这一层的结果是不完整的，不可信！
-        // 我们必须丢弃这一层的结果，使用上一层 (depth-2) 找到的 bestMove
+        // 如果在这一层搜索过程中超时了，丢弃这一层结果并回退
         if (isTimeOut) {
-            printf("深度 %d 搜索超时，回退使用深度 %d 的结果\n", depth, depth - 2);
             break; 
         } else {
             // 如果没超时，更新最佳移动
             bestMove = currentBestMove;
-            printf("深度 %d 完成，最佳点 (%d,%d) 分数 %d，耗时 %.2fs\n", 
-                   depth, bestMove.y, bestMove.x, currentBestScore, 
-                   (double)(clock() - startTime) / CLOCKS_PER_SEC);
-            
-            // 如果已经找到必胜路径，没必要再深搜了
+            // 若已找到必胜点则可以提前停止
             if (currentBestScore >= WIN - 20) break; 
         }
     }
+
+    // 打印本次AI决策消耗的总时长（只打印最终落子的用时）
+    double elapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
+    // 不在此处打印，保存到全局以便外层在清屏后输出
+    lastAIDuration = elapsed;
 
     return bestMove;
 }
@@ -124,10 +241,10 @@ int getPointScore(int x,int y,int myColor){//输入一个点的坐标x:横坐标
     if(attackScore>=WIN || defenseScore>=WIN) return WIN; //在这儿落子，要么自己赢，要么对手赢，所以必须下这里
     if(attackScore>=LIVE4) return LIVE4; //有活四先下活四
 
-    return attackScore+defenseScore;
+    return attackScore+defenseScore*1.2;//综合得分，防守权重稍微高一点
 }
 
-int lineScore(int x,int y, LineInfo lineinfo){//计算一条线上的得分
+int lineScore(int x,int y, LineInfo lineinfo){//计算一条线上的得分,返回值为对应棋型的分数
     int result;
     if(lineinfo.count==5){
         return WIN;
@@ -162,20 +279,51 @@ int lineScore(int x,int y, LineInfo lineinfo){//计算一条线上的得分
 
 //用于评估在(x,y)处下一个Color颜色的子得到的四个方向的总分
 int evaluateOnecolor(int x,int y,int Color){
-    int totalScore=0;
-    LineInfo lineinfo=countLine(x,y,Color,HOR);//先计算横向信息
-    totalScore+=lineScore(x,y,lineinfo);//计算横向分数
+    // 将四个方向的线型先分别评估，再合并判断复杂棋形（双活三、双四等）
+    int dirScores[4];
+    LineInfo info;
+    int live3_count = 0;
+    int live4_count = 0;
+    int broken4_count = 0;
+    int total = 0;
 
-    lineinfo=countLine(x,y,Color,VER);//计算竖向信息
-    totalScore+=lineScore(x,y,lineinfo);
+    // 横、竖、主对角、副对角
+    info = countLine(x,y,Color,HOR);   //暂存一条线上的信息
+    dirScores[0] = lineScore(x,y,info);
+    
+    info = countLine(x,y,Color,VER);   
+    dirScores[1] = lineScore(x,y,info);
+    
+    info = countLine(x,y,Color,DIAG_M);
+    dirScores[2] = lineScore(x,y,info);
+    
+    info = countLine(x,y,Color,DIAG_S);
+    dirScores[3] = lineScore(x,y,info);
 
-    lineinfo=countLine(x,y,Color,DIAG_M);
-    totalScore+=lineScore(x,y,lineinfo);
+    for(int i=0;i<4;i++){
+        int s = dirScores[i];
+        if(s>=WIN) return WIN; // 任何方向直接成五/长连
+        if(s==LIVE4) live4_count++;
+        if(s==BROKEN4) broken4_count++;
+        if(s==LIVE3) live3_count++;
+        total += s;
+    }
 
-    lineinfo=countLine(x,y,Color,DIAG_S);
-    totalScore+=lineScore(x,y,lineinfo);
+    
+    // 双活四（存在任一活四已足够）
+    if(live4_count>0) return LIVE4;
+    // 双冲四/活四+冲四/两个冲四视为非常危险，提升为接近活四的权重
+    if(broken4_count>=2) return LIVE4;
+    if(broken4_count>=1 && live3_count>=1) return LIVE4;
 
-    return totalScore;
+    // 双活三（两处活三通常等价于必胜威胁），提升到活四级别以在搜索中优先处理
+    if(live3_count>=2) return LIVE4;
+
+    // 活三也要堵：单个活三视为需要优先防守的威胁，返回 LIVE3
+    if(live3_count==1) return LIVE3;
+
+    // 若无关键组合，返回四个方向分数之和（保留原有细分）
+    return total;
 }
 
 int isBoardEmpty(){
@@ -207,36 +355,139 @@ int hasNeighbor(int x,int y,int distance){//判断(x,y)附近distance距离内�
     return 0;//扫描结束也没有返回，则无邻居
 }
 
+
 int generateMoves(Move moves[],int myColor){//返回值是有效候选点的个数，参数一个是候选点数组作为列表，一个是本次模拟的落子颜色
     int count=0;//记录候选点个数
-    //扫描全盘
+    int enemyColor = (myColor==BLACK)? WHITE:BLACK;
+    int visited[SIZE][SIZE] = {0};//标记已经加入候选列表的点，避免重复加入
+
+    
+
+    // 先扫描是否存在一步必胜（我方），若存在直接返回该步
     for(int row=0;row<SIZE;row++){
         for(int col=0;col<SIZE;col++){
-            //落子处必须没子才行：
-            if(arrayForInnerBoardLayout[row][col]!=EMPTY){
-                continue;
+            if(arrayForInnerBoardLayout[row][col]!=EMPTY) continue;
+            int score = getPointScore(col,row,myColor);
+            if(score >= WIN){
+                moves[0].p.x = col;
+                moves[0].p.y = row;
+                moves[0].score = score;
+                return 1; // 直接返回必胜点
             }
-            //如果是黑子，检查禁手，如果是禁手则跳过
-            if(myColor==BLACK&&isForbiddenPoint(col,row)==1){
-                continue;
-            }
-            //只搜索周围2x2的矩形内的点是否有棋子（distance==2），以提高效率
-            if(!hasNeighbor(col,row,DISTANCE)){
-                continue;
-            }
+        }
+    }
 
-            //走到这一步说明是一个值得搜索的点
-            //记录坐标
-            moves[count].p.x=col;
-            moves[count].p.y=row;
+// 优先检测对手最近一次落子是否直接造成威胁（活三/活四/冲四）
+    // 如果对手刚刚形成威胁，则只返回针对这些威胁的封堵点（强制防守）
+    if (currentPoint.x >= 0 && currentPoint.y >= 0) {
+        int lr = currentPoint.y;
+        int lc = currentPoint.x;
+        if (arrayForInnerBoardLayout[lr][lc] == enemyColor) {
+            int threat = 0;
+            for (int d = 0; d < 4; d++) {
+                LineInfo li = countLine(lc, lr, enemyColor, d);
+                if (li.count >= 4) threat = 1; // 活四/冲四/四连
+                if (li.count == 3 && li.blocked == LIVE) threat = 1; // 活三
+            }
+            if (threat) {
+                // 搜索最近区域内的封堵点（范围±4）并作为唯一候选返回
+                int blk_count = 0;
+                int rowS = (lr-4<0)?0:lr-4;
+                int rowE = (lr+4>SIZE-1)?SIZE-1:lr+4;
+                int colS = (lc-4<0)?0:lc-4;
+                int colE = (lc+4>SIZE-1)?SIZE-1:lc+4;
+                for (int r = rowS; r <= rowE; r++) {
+                    for (int c = colS; c <= colE; c++) {
+                        if (arrayForInnerBoardLayout[r][c] != EMPTY) continue;
+                        int defScore = evaluateOnecolor(c, r, enemyColor);
+                        if (defScore >= LIVE3) {
+                            moves[blk_count].p.x = c;
+                            moves[blk_count].p.y = r;
+                            moves[blk_count].score = defScore + WIN; // 强制高优先级
+                            blk_count++;
+                            if (blk_count >= SIZE*SIZE) break;
+                        }
+                    }
+                    if (blk_count >= SIZE*SIZE) break;
+                }
+                if (blk_count > 0) {
+                    if (blk_count > 1) qsort(moves, blk_count, sizeof(Move), compareMoves);
+                    return blk_count;
+                }
+            }
+        }
+    }
 
-            //用之前的获取分数函数对当前下这处的选择打分，便于排序
-            moves[count].score=getPointScore(col,row,myColor);
+    // 扫描对手一步必胜的点（必须防守），优先加入
+    for(int row=0;row<SIZE;row++){
+        for(int col=0;col<SIZE;col++){
+            if(arrayForInnerBoardLayout[row][col]!=EMPTY) continue;
+            int defenseScore = getPointScore(col,row,enemyColor);
+            if(defenseScore >= WIN){
+                moves[count].p.x = col;
+                moves[count].p.y = row;
+                moves[count].score = defenseScore + WIN; // 极高优先级
+                visited[row][col] = 1;
+                count++;
+            }
+        }
+    }
+
+    // 若存在对手的活三（需要及时封堵），优先把这些封堵点放到候选列表前面
+    // 单独提高活三封堵点的权重，确保它们在后续的候选生成和排序中靠前
+    for(int row=0;row<SIZE;row++){
+        for(int col=0;col<SIZE;col++){
+            if(arrayForInnerBoardLayout[row][col]!=EMPTY) continue;
+            if(visited[row][col]) continue;
+            int defenseScore = evaluateOnecolor(col,row,enemyColor);
+            if(defenseScore == LIVE3){
+                moves[count].p.x = col;
+                moves[count].p.y = row;
+                // 给活三封堵点更高的临时权重，确保排在普通高危点前面
+                moves[count].score = defenseScore + (WIN/5);
+                visited[row][col] = 1;
+                count++;
+            }
+        }
+    }
+
+    // 再收集需要优先防守的高危点（敌方活三/活四等），赋高分以排在前面
+    for(int row=0;row<SIZE;row++){
+        for(int col=0;col<SIZE;col++){
+            if(arrayForInnerBoardLayout[row][col]!=EMPTY) continue;
+            if(visited[row][col]) continue;
+            int defenseScore = evaluateOnecolor(col,row,enemyColor);
+            if(defenseScore >= LIVE3){
+                // 若该点对手威胁较大，则先考虑
+                moves[count].p.x = col;
+                moves[count].p.y = row;
+                moves[count].score = defenseScore + (WIN/10);
+                visited[row][col] = 1;
+                count++;
+            }
+        }
+    }
+
+    // 常规候选生成（邻域+禁手过滤），并跳过已加入的点
+    for(int row=0;row<SIZE;row++){
+        for(int col=0;col<SIZE;col++){
+            if(arrayForInnerBoardLayout[row][col]!=EMPTY) continue;
+            if(visited[row][col]) continue;
+
+            // 如果是黑子，检查禁手，如果是禁手则跳过
+            if(myColor==BLACK && isForbiddenPoint(col,row)==1) continue;
+
+            // 只搜索周围 DISTANCE 范围内的点
+            if(!hasNeighbor(col,row,DISTANCE)) continue;
+
+            moves[count].p.x = col;
+            moves[count].p.y = row;
+            moves[count].score = getPointScore(col,row,myColor);
             count++;
         }
     }
-    //对所有候选点进行排序，从高到底，以便于剪枝,更快剪掉不必要的分支
-    //这里使用快速排序
+
+    // 对候选点按分数排序（高->低）
     if(count>1){
         qsort(moves,count,sizeof(Move),compareMoves);
     }
@@ -412,11 +663,10 @@ int minimax(int depth, int alpha, int beta, int isMax, int myColor){
         }
     }
 
-    // 5. 存置换表 (Store TT)
+    // 存置换表
     // 如果没有超时，才把结果存进去；否则存的是半成品，有错误
     if (!isTimeOut) {
-        // 替换策略：始终替换，或者深度更深时替换 (这里用简单的总是替换策略，或者 depth >= tt->depth)
-        // 实际上最好是: if (tt->key == 0 || depth >= tt->depth)
+        // 替换策略：始终替换
         tt->key = currentHash;
         tt->depth = depth;
         tt->score = bestValue;

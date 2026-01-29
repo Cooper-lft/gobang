@@ -7,15 +7,15 @@
 
 
 //不同落子下的得分的宏
-#define WIN 1000000
-#define LIVE4 100000
-#define BROKEN4 1000 //冲四
+#define WIN 10000000      // 必胜极大值（提高以避免与INF冲突）
+#define LIVE4 1000000
+#define BROKEN4 200000    // 冲四
 #define DEAD4 0
-#define LIVE3 1000
-#define BROKEN3 100 //冲三
-#define DEAD3 0 //死三
-#define LIVE2 100
-#define BROKEN2 10 //冲二
+#define LIVE3 50000       // 活三
+#define BROKEN3 5000
+#define DEAD3 0
+#define LIVE2 1000
+#define BROKEN2 100
 #define DEAD2 0//死二
 
 typedef struct{//存坐标和分数，用于辅助判断需要考虑搜索哪些点
@@ -26,7 +26,7 @@ typedef struct{//存坐标和分数，用于辅助判断需要考虑搜索哪些
 #define DISTANCE 2 //检查该点处是否有邻居的正方形“半径”范围
 extern Move moves[SIZE*SIZE];//存储AI准备落的候选点的数组
 
-#define INF 1000000 //无穷大，用于初始化
+#define INF 100000000 // 无穷大，增大以避免与 WIN 冲突
 
 typedef struct {
     unsigned long long key; // Zobrist Hash 校验码
@@ -46,16 +46,12 @@ typedef struct {
 
 //Zobrist 随机数数组 [行][列][颜色(0空,1黑,2白)]
 extern unsigned long long zArray[SIZE][SIZE][3];
-
-//当前棋盘的实时 Hash 值
 extern unsigned long long currentHash;
-
-//置换表数组
 extern TTEntry tTable[TT_SIZE];
-
-//超时标记 (用于 minimax 中断)
 extern int isTimeOut;
 
+// 记录上次 AI 决策用时（秒）
+extern double lastAIDuration;
 
 //初始化 Zobrist 哈希表 (需要在 main 开头调用)
 void initZobrist(void);
@@ -73,4 +69,10 @@ int evaluateBoard(int myColor);
 void makeMove(Point p,int Color);
 void unmakeMove(Point p);
 int minimax(int depth, int alpha, int beta, int isMax, int myColor);
+
+// 处理威胁棋子：分析对手最后下的子有没有形成活三或者活四/冲四
+// 如果没有检测到威胁则返回 (-1,-1)
+Point handle_opponent_fours(int myColor);   // 处理对手的活四
+Point handle_opponent_broken4(int myColor); // 处理对手的冲四
+Point handle_opponent_live3(int myColor);   // 处理对手的活三
 #endif

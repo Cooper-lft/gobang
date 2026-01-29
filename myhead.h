@@ -56,6 +56,8 @@ typedef struct{
 //数组声明
 extern int arrayForInnerBoardLayout[SIZE][SIZE];
 
+extern Point currentPoint;
+
 
 //函数声明
 void initRecordBorard(void);
