@@ -1,146 +1,168 @@
 #include "myhead.h"
 #include "forbidden.h"
 
-// 辅助宏：判断坐标是否在棋盘内
+// 宏：判断坐标是否在棋盘内
 #define IS_VALID(x, y) ((x) >= 0 && (x) < SIZE && (y) >= 0 && (y) < SIZE)
 
-// 辅助函数：获取指定位置的棋子颜色，越界视为白棋（也就是对手/墙壁）
-// 因为对于黑棋来说，墙壁和白棋的效果是一样的，都是阻挡
+// 获取棋子状态，越界视为墙壁（即当作白棋/对手处理）
 static int getStone(int x, int y) {
     if (!IS_VALID(x, y)) return WHITE; 
     return arrayForInnerBoardLayout[y][x];
 }
 
-// 核心分析函数：分析某个方向上形成的棋型
-// 参数：x, y 落子点; dx, dy 方向向量
-// 返回值：
-// 0 - 什么都不是
-// 1 - 活三 (Live Three)
-// 2 - 四 (冲四或活四) (Four)
-// 3 - 五连 (Five)
-// 4 - 长连 (Overline)
-static int analyzeLine(int x, int y, int dx, int dy) {
-    // 临时数组存储该方向上的棋型，中心点在索引 4
-    // 范围取前后各4格，共9格： O O O O X O O O O
-    int line[9]; 
-    
-    // 1. 提取线条信息
+// 将以 (x,y) 为中心，方向 (dx,dy) 上的前后4格提取到 buffer 中
+// buffer[4] 永远是中心点 (x,y)
+static void getLine(int x, int y, int dx, int dy, int buffer[9]) {
     for (int i = -4; i <= 4; i++) {
-        int cx = x + i * dx;
-        int cy = y + i * dy;
-        if (i == 0) {
-            line[4 + i] = BLACK; // 假设当前点落了黑子
-        } else {
-            line[4 + i] = getStone(cx, cy);
+        buffer[i + 4] = getStone(x + i * dx, y + i * dy);
+    }
+}
+
+
+// 基础形状判断(在一维数组上判断)
+
+
+// 判断是否成五 (11111)
+static int hasFive(int line[9]) {
+    for (int i = 0; i <= 4; i++) { // 窗口滑动
+        int count = 0;
+        for (int k = 0; k < 5; k++) {
+            if (line[i+k] == BLACK) count++;
         }
+        if (count == 5) return 1;
     }
-
-    // 2. 扫描连珠情况 (Count Consecutive)
-    // 只需要看包含中心点(索引4)的连珠
-    int maxLen = 0;
-    int currentLen = 0;
-
-    
-    // 判断长连(6个及以上)
-    int left = 4, right = 4;
-    while (left > 0 && line[left - 1] == BLACK) left--;
-    while (right < 8 && line[right + 1] == BLACK) right++;
-    int len = right - left + 1;
-    if (len >= 6) return 4; // 长连
-    if (len == 5) return 3; // 五连
-
-    // 接下来判断四和活三
-    // 为了准确判断跳四和跳三，我们分析中心点左右的结构
-    
-    // 我们的目标是识别以下模式 (B=Black, E=Empty, W=White/Wall)
-    // 活三： E B B B E (标准) 或 E B E B B E (跳三)
-    // 四：   B B B B (活四/冲四) 或 B E B B B (跳四) 等
-    
-    // 我们枚举所有经过中心点的 5 格或 6 格窗口来检测
-    
-    int fourCount = 0;
-    int threeCount = 0; // 活三计数
-
-    // A. 检测“四” (Four)
-    // 特征：5个格子里有4个黑子，或者6个格子里有4个黑子且中间空1个
-    
-    // 扫描所有可能的5格窗口 (索引 0-4 到 4-8)
-    for(int i = 0; i <= 4; i++) {
-        // 窗口范围 line[i] 到 line[i+4]
-        // 必须包含中心点 index 4
-        if (i > 4 || i + 4 < 4) continue;
-        
-        int bCount = 0;
-        int eCount = 0;
-        for(int k=0; k<5; k++) {
-            if(line[i+k] == BLACK) bCount++;
-            else if(line[i+k] == EMPTY) eCount++;
-        }
-        
-        if(bCount == 4 && eCount == 1) return 2; // 这是一个四 (可能是冲四也可能是活四，禁手规则里统称四)
-        if(bCount == 5) return 3; // 五连
-    }
-
-    // B. 检测“活三” (Live Three)
-    // 活三必须是“本方再走一着可以形成活四”。
-    // 典型形状： 0 1 1 1 0 (标准) 或 0 1 0 1 1 0 (跳三)
-    // 关键点：两端必须是空的，且被封堵后不能成四
-    
-    // 模式1：标准活三 0 1 1 1 0
-    if (line[3]==BLACK && line[5]==BLACK && line[2]==EMPTY && line[6]==EMPTY) {
-        // 中心是4，且连续3个黑子，两头空
-        // 还要确保不是 0 1 1 1 1 0 (那是四) -> 前面已经check过四了，这里安全
-        return 1;
-    }
-    
-    // 模式2：左跳活三 0 1 0 1 1 0  (中心在右边两个1里)
-    if (line[3]==EMPTY && line[2]==BLACK && line[1]==EMPTY && line[5]==BLACK && line[6]==EMPTY) return 1;
-    
-    // 模式3：右跳活三 0 1 1 0 1 0 (中心在左边两个1里)
-    if (line[5]==EMPTY && line[6]==BLACK && line[7]==EMPTY && line[3]==BLACK && line[2]==EMPTY) return 1;
-
-    // 模式4：中心跳活三 0 1 1 0 1 0 (中心在 0 的位置? 不对，中心必须是刚下的子)
-    // 如果刚下在中间空位： 1 (1) 1 -> 变成 1 1 1，这回归到模式1
-
     return 0;
 }
 
-int isForbiddenPoint(int x, int y){
-    
-    //如果这个点本身已经有子，不能下
-    if (arrayForInnerBoardLayout[y][x] != EMPTY) return 0;
+// 判断是否长连 (111111...)
+static int hasOverline(int line[9]) {
+    for (int i = 0; i <= 3; i++) {
+        int count = 0;
+        for (int k = 0; k < 6; k++) { // 检查6个
+            if (line[i+k] == BLACK) count++;
+        }
+        if (count == 6) return 1;
+    }
+    return 0;
+}
 
-    int fiveCount = 0;
-    int overlineCount = 0;
-    int fourCount = 0;
-    int threeCount = 0;
+// 判断是否是“标准活四” (011110)
+// 这是判断活三的基础：如果加一颗子能变成这样，那就是活三
+static int checkLiveFourShape(int line[9]) {
+    for (int i = 0; i <= 3; i++) {
+        // 模式： EMPTY + BLACK*4 + EMPTY
+        if (line[i] == EMPTY &&
+            line[i+1] == BLACK &&
+            line[i+2] == BLACK &&
+            line[i+3] == BLACK &&
+            line[i+4] == BLACK &&
+            line[i+5] == EMPTY) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
-    // 四个方向：横、竖、撇、捺
+// 虚拟落子
+
+// 判断是否是“四” (包括冲四和活四)
+// 定义：在这一行再加一颗黑子，能连成五 (且不是长连)
+static int checkFour(int line[9]) {
+    // 遍历 buffer 中的空位，尝试填入黑子
+    for (int i = 0; i < 9; i++) {
+        if (line[i] == EMPTY) {
+            line[i] = BLACK; // 虚拟落子
+            
+            // 如果落子后形成5连，且没有形成长连，那就是“四”
+            if (hasFive(line) && !hasOverline(line)) {
+                line[i] = EMPTY; // 还原
+                return 1;
+            }
+            line[i] = EMPTY; // 还原
+        }
+    }
+    return 0;
+}
+
+// 判断是否是“活三”
+// 定义：在这一行再加一颗黑子，能形成“标准活四”(011110)
+// 注意：禁手规则里，必须形成活四才算活三。如果形成冲四不算活三。
+static int checkLiveThree(int line[9]) {
+    for (int i = 0; i < 9; i++) {
+        if (line[i] == EMPTY) {
+            line[i] = BLACK; // 虚拟落子
+            
+            // 核心逻辑：加一子能变活四，原状即为活三
+            if (checkLiveFourShape(line)) {
+                line[i] = EMPTY; // 还原
+                return 1;
+            }
+            line[i] = EMPTY; // 还原
+        }
+    }
+    return 0;
+}
+
+// 主入口：判断禁手
+int isForbiddenPoint(int x, int y) {
+    // 【关键修复】：保存原始状态
+    // 不管本来是 EMPTY 还是 BLACK (刚下的)，我们都先记下来
+    int originalState = arrayForInnerBoardLayout[y][x];
+
+    // 如果该点是白子（对手），那肯定不是禁手（或者逻辑错误），直接返回
+    if (originalState == WHITE) return 0;
+
+    // 1. 强制设为黑子进行检查
+    arrayForInnerBoardLayout[y][x] = BLACK;
+
     int dxs[] = {1, 0, 1, 1};
     int dys[] = {0, 1, 1, -1};
 
+    int fiveCount = 0;     // 五连个数
+    int overlineCount = 0; // 长连个数
+    int fourCount = 0;     // 四的个数 (活四+冲四)
+    int threeCount = 0;    // 活三的个数
+
+    int lineBuffer[9]; // 用于缓存一条线 (前后各4格，共9格)
+
+    // 遍历四个方向
     for (int i = 0; i < 4; i++) {
-        int result = analyzeLine(x, y, dxs[i], dys[i]);
-        
-        if (result == 3) fiveCount++;       // 五连
-        else if (result == 4) overlineCount++; // 长连
-        else if (result == 2) fourCount++;  // 四
-        else if (result == 1) threeCount++; // 活三
+        // 提取当前方向的线到 buffer
+        getLine(x, y, dxs[i], dys[i], lineBuffer);
+
+        // A. 检查成五
+        if (hasFive(lineBuffer)) {
+            // 注意：要区分是正好5个还是长连
+            if (hasOverline(lineBuffer)) {
+                overlineCount++;
+            } else {
+                fiveCount++;
+            }
+        } 
+        // B. 如果没成五，才去检查三和四 (因为成五优先级最高)
+        else {
+            if (checkFour(lineBuffer)) fourCount++;
+            if (checkLiveThree(lineBuffer)) threeCount++;
+        }
     }
 
-    // 禁手优先级判断规则：
-    
-    // 黑方五连与禁手同时形成，禁手失效，黑方胜
-    if (fiveCount > 0) return 0; 
+    // 2. 还原棋盘状态
+    arrayForInnerBoardLayout[y][x] = originalState;
 
-    // 长连禁手：形成的5个以上同色棋子
+    // 3. 判定禁手优先级
+
+    // 优先级 1：成五 (Win) - 如果落子能成五，禁手失效，黑棋直接获胜
+    if (fiveCount > 0) return 0;
+
+    // 优先级 2：长连 (Forbidden)
     if (overlineCount > 0) return 1;
 
-    // 四四禁手：形成两个或两个以上的冲四或活四
+    // 优先级 3：四四禁手 (Double Four) - 两个或以上“四”
     if (fourCount >= 2) return 1;
 
-    // 三三禁手：形成两个或两个以上的活三
+    // 优先级 4：三三禁手 (Double Live Three) - 两个或以上“活三”
     if (threeCount >= 2) return 1;
 
-    return 0; // 不是禁手
+    // 安全点
+    return 0;
 }

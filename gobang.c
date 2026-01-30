@@ -156,15 +156,22 @@ int main()
     }else if(workstate==PVP){//PVP主程序
         while (1)
         {
+            static int isforbidden=0;//初始化，用于记录是否为禁手
             //显示棋盘
             innerLayoutToDisplayArray(currentPoint);
             displayBoard();
-            
             currentPoint=getPlayerMove(currentPlayerColor);//获取玩家落子
             arrayForInnerBoardLayout[currentPoint.y][currentPoint.x]=currentPlayerColor;
             innerLayoutToDisplayArray(currentPoint);
             displayBoard();
-            
+
+            if(currentPlayerColor==BLACK){//黑棋需要检查禁手
+                isforbidden=isForbiddenPoint(currentPoint.x,currentPoint.y);//检查是否为禁手
+                if(isforbidden==1){
+                    printf("黑方落子(%c,%d)为禁手，白方获胜\n",currentPoint.x+'A',SIZE-currentPoint.y);
+                    return 0;
+                }
+            }
             isWin=checkWin(currentPoint.x,currentPoint.y,currentPlayerColor);
             if(isWin==1){
                 printf("%s方获胜\n",((currentPlayerColor==BLACK)?"黑":"白"));
@@ -176,7 +183,7 @@ int main()
         
     }
 
-/*
+/*用于测验棋盘是否打印正确的代码
     arrayForInnerBoardLayout[0][0]=1;    //在棋盘的左上角落一个黑色棋子
     innerLayoutToDisplayArray();  //将心中的棋盘转成用于显示的棋盘
     displayBoard();          //显示棋盘

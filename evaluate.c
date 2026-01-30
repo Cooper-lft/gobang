@@ -2,12 +2,12 @@
 #include "evaluate.h"
 #include "forbidden.h"
 
-// 全局 Zobrist 数组：[行][列][颜色(0空, 1黑, 2白)]
+// 全局Zobrist数组:[行][列][颜色(0空, 1黑, 2白)]
 unsigned long long zArray[SIZE][SIZE][3];
 unsigned long long currentHash = 0;
 TTEntry tTable[TT_SIZE];
 
-// 生成随机 64 位整数
+// 生成随机64位整数
 unsigned long long rand64() {
     return (unsigned long long)rand() ^ 
            ((unsigned long long)rand() << 15) ^ 
@@ -16,7 +16,7 @@ unsigned long long rand64() {
            ((unsigned long long)rand() << 60);
 }
 
-// 初始化 Zobrist 数组 (在 main 函数最开始调用一次)
+// 初始化Zobrist数组(在main函数最开始调用一次)
 void initZobrist() {
     srand(time(NULL));
     for (int i = 0; i < SIZE; i++) {
@@ -25,7 +25,7 @@ void initZobrist() {
             zArray[i][j][WHITE] = rand64();
         }
     }
-    currentHash = 0; // 初始空棋盘 Hash 为 0
+    currentHash = 0; // 初始空棋盘Hash为0
     // 清空置换表
     memset(tTable, 0, sizeof(tTable)); 
 }
@@ -35,7 +35,7 @@ int isTimeOut = 0;
 clock_t startTime;
 
 
-//参数是己方的棋子颜色
+// 参数是己方的棋子颜色
 // 全局：记录上次 AI 决策用时（秒）
 double lastAIDuration = 0.0;
 
@@ -49,7 +49,7 @@ Point handle_opponent_fours(int myColor) {
 
     int lr = currentPoint.y, lc = currentPoint.x;
     int found = 0;
-    // 检查任何方向的四个点 (包括冲四/活四)
+    // 检查任何方向的四个点(包括冲四/活四)
     for (int d = 0; d < 4; d++) {
         LineInfo li = countLine(lc, lr, enemyColor, d);
         if (li.count >= 4) { found = 1; break; }
@@ -84,10 +84,12 @@ Point handle_opponent_fours(int myColor) {
     return cand[0].p;
 }
 
+//处理对手的冲四威胁，返回封堵点
 Point handle_opponent_broken4(int myColor){
     return handle_opponent_fours(myColor);
 }
 
+//处理对手的活三威胁，返回封堵点
 Point handle_opponent_live3(int myColor){
     Point res = {-1,-1};
     if (currentPoint.x < 0 || currentPoint.y < 0) return res;
@@ -246,7 +248,7 @@ int getPointScore(int x,int y,int myColor){//输入一个点的坐标x:横坐标
 
 int lineScore(int x,int y, LineInfo lineinfo){//计算一条线上的得分,返回值为对应棋型的分数
     int result;
-    if(lineinfo.count==5){
+    if(lineinfo.count==5){//如果是五连...，下面依次是四连，三连，二连
         return WIN;
     }else if(lineinfo.count==4){
         if(lineinfo.blocked==LIVE){
@@ -532,7 +534,6 @@ void makeMove(Point p,int Color){
 //撤销落子（悔棋）
 void unmakeMove(Point p){
     // 必须先取出颜色，因为置为 EMPTY 后就不知道刚才是什么色了
-    // 优化：调用者通常知道颜色，或者直接从棋盘读
     int color = arrayForInnerBoardLayout[p.y][p.x]; 
 
     arrayForInnerBoardLayout[p.y][p.x] = EMPTY;
